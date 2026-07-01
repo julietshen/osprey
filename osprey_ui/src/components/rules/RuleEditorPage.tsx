@@ -121,7 +121,10 @@ const RuleEditorView: React.FC<{ data: BootstrapData }> = ({ data }) => {
   const [validation, setValidation] = React.useState<RuleDraftValidationResponse | null>(null);
   const [isValidating, setIsValidating] = React.useState<boolean>(false);
   const [submitState, setSubmitState] = React.useState<
-    { kind: 'idle' } | { kind: 'submitting' } | { kind: 'done'; prUrl: string } | { kind: 'error'; message: string }
+    | { kind: 'idle' }
+    | { kind: 'submitting' }
+    | { kind: 'done'; title: string; prUrl: string | null }
+    | { kind: 'error'; message: string }
   >({ kind: 'idle' });
 
   const effectiveSource = mode === 'builder' ? generateSmlFromBuilder(builder, data.vocabulary.features) : codeSource;
@@ -183,9 +186,9 @@ const RuleEditorView: React.FC<{ data: BootstrapData }> = ({ data }) => {
         is_new_rule: data.isNewRule,
         wire_into_main: wireIntoMain,
       });
-      setSubmitState({ kind: 'done', prUrl: res.pr_url });
+      setSubmitState({ kind: 'done', title: res.title, prUrl: res.url });
       const wiredMsg = res.main_sml_updated ? ' (main.sml updated)' : '';
-      message.success(`Pull request #${res.pr_number} opened${wiredMsg}.`);
+      message.success(`${res.title}${wiredMsg}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSubmitState({ kind: 'error', message: msg });
@@ -314,7 +317,10 @@ const RuleEditorView: React.FC<{ data: BootstrapData }> = ({ data }) => {
 
 const SubmitBanner: React.FC<{
   submitState:
-    { kind: 'idle' } | { kind: 'submitting' } | { kind: 'done'; prUrl: string } | { kind: 'error'; message: string };
+    | { kind: 'idle' }
+    | { kind: 'submitting' }
+    | { kind: 'done'; title: string; prUrl: string | null }
+    | { kind: 'error'; message: string };
 }> = ({ submitState }) => {
   if (submitState.kind === 'idle') return null;
   if (submitState.kind === 'submitting') {
@@ -326,11 +332,13 @@ const SubmitBanner: React.FC<{
         type="success"
         showIcon
         style={{ marginBottom: 12 }}
-        message="Pull request opened"
+        message={submitState.title}
         description={
-          <a href={submitState.prUrl} target="_blank" rel="noopener noreferrer">
-            {submitState.prUrl}
-          </a>
+          submitState.prUrl ? (
+            <a href={submitState.prUrl} target="_blank" rel="noopener noreferrer">
+              {submitState.prUrl}
+            </a>
+          ) : null
         }
       />
     );

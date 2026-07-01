@@ -33,7 +33,7 @@ from osprey.worker.lib.singletons import ENGINE
 from osprey.worker.ui_api.osprey.lib.abilities import CanEditRuleDrafts, require_ability
 from osprey.worker.ui_api.osprey.lib.auth import get_current_user_email
 
-from . import _rule_drafts_github as github_backend
+from . import _rule_drafts_backend as backends
 from ._engine_ast_utils import get_func_identifier
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 blueprint = Blueprint('rule_drafts', __name__)
 
 _VALID_PATH = re.compile(r'^[A-Za-z0-9_./-]+\.sml$')
-_VALID_BRANCH = re.compile(r'^[A-Za-z0-9._/-]{1,180}$')
 _VALID_RULE_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
@@ -308,15 +307,6 @@ def vocabulary() -> Any:
     )
 
 
-def _generate_branch_name(rule_name: str, author_email: str) -> str:
-    import time
-
-    short_email = author_email.split('@', 1)[0]
-    slug = re.sub(r'[^A-Za-z0-9_-]+', '-', short_email).strip('-') or 'osprey-ui'
-    rule_slug = re.sub(r'[^A-Za-z0-9_-]+', '-', rule_name).strip('-') or 'rule'
-    return f'rule-draft/{slug}/{rule_slug}-{int(time.time())}'
-
-
 @blueprint.route('/rule-drafts/submit', methods=['POST'])
 @require_ability(CanEditRuleDrafts)
 def submit_draft() -> Any:
@@ -327,7 +317,6 @@ def submit_draft() -> Any:
     summary = (payload.get('summary') or '').strip()
     is_new_rule = bool(payload.get('is_new_rule', False))
     wire_into_main = bool(payload.get('wire_into_main', False))
-    branch_override = (payload.get('branch') or '').strip()
 
     path_err = _validate_path(path)
     if path_err:
@@ -336,8 +325,6 @@ def submit_draft() -> Any:
         return jsonify({'error': 'source must be a non-empty string.'}), 400
     if not _VALID_RULE_NAME.match(rule_name):
         return jsonify({'error': 'rule_name must be a valid SML identifier ([A-Za-z_][A-Za-z0-9_]*).'}), 400
-    if branch_override and not _VALID_BRANCH.match(branch_override):
-        return jsonify({'error': 'branch contains disallowed characters.'}), 400
 
     # Re-validate server-side so a client that skips the validate step still cannot push uncompilable SML.
     spliced = _current_sources_dict()
@@ -359,37 +346,32 @@ def submit_draft() -> Any:
     except Exception as exc:
         return jsonify({'error': f'Could not assemble sources: {exc}'}), 400
 
-    author_email = get_current_user_email()
-    branch = branch_override or _generate_branch_name(rule_name, author_email)
-
     try:
-        cfg = github_backend.load_config()
-        result = github_backend.submit_draft(
-            cfg,
+        backend = backends.load_backend()
+        result = backend.submit_draft(
             draft_path=path,
             sml_source=source_text,
             rule_name=rule_name,
             summary=summary,
-            branch=branch,
-            author_email=author_email,
+            author_email=get_current_user_email(),
             is_new_rule=is_new_rule,
             wire_into_main=wire_into_main,
         )
-    except github_backend.RuleDraftBackendError as exc:
+    except backends.RuleDraftBackendError as exc:
         return jsonify({'error': exc.message}), exc.status_code
 
-    return jsonify(result)
+    return jsonify(result.to_json())
 
 
 @blueprint.route('/rule-drafts/pending', methods=['GET'])
 @require_ability(CanEditRuleDrafts)
 def pending_drafts() -> Any:
     try:
-        cfg = github_backend.load_config()
-        prs = github_backend.list_open_pull_requests(cfg)
-    except github_backend.RuleDraftBackendError as exc:
+        backend = backends.load_backend()
+        drafts = backend.list_pending_drafts()
+    except backends.RuleDraftBackendError as exc:
         return jsonify({'error': exc.message, 'pending': []}), exc.status_code
-    return jsonify({'pending': prs})
+    return jsonify({'pending': [d.to_json() for d in drafts]})
 
 
 # The set of comparator strings the Rule Builder UI can render.

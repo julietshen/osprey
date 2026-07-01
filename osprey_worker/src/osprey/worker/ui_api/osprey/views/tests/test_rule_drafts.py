@@ -1,10 +1,25 @@
 import base64
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 import requests_mock as requests_mock_module
 from flask import Response, url_for
 from flask.testing import FlaskClient
+
+
+def _set_github_backend(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
+    """Configure the github backend with sensible defaults for tests; overrides win."""
+    defaults = {
+        'OSPREY_RULES_SUBMISSION_BACKEND': 'github',
+        'OSPREY_RULES_REPO': 'roostorg/osprey-rules',
+        'OSPREY_GITHUB_TOKEN': 'gh_fake_token',
+        'OSPREY_RULES_BASE_BRANCH': 'main',
+    }
+    for k, v in {**defaults, **overrides}.items():
+        monkeypatch.setenv(k, v)
+
 
 _acl_with_draft_ability = json.dumps(
     {
@@ -201,9 +216,31 @@ def test_vocabulary_returns_features_udfs_effects(client: 'FlaskClient[Response]
 
 
 @pytest.mark.use_rules_sources(_base_sources)
-def test_submit_returns_503_when_github_not_configured(
+def test_submit_returns_503_when_no_backend_configured(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.delenv('OSPREY_RULES_SUBMISSION_BACKEND', raising=False)
+    res = client.post(
+        url_for('rule_drafts.submit_draft'),
+        json={
+            'path': 'rules/new_rule.sml',
+            'source': "AnotherRule = Rule(when_all=[PostText == 'bye'], description='bye')",
+            'rule_name': 'AnotherRule',
+            'summary': 'demo',
+            'is_new_rule': True,
+        },
+    )
+    assert res.status_code == 503
+    body = res.json
+    assert body is not None
+    assert 'No rule-submission backend is configured' in body['error']
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_submit_returns_503_when_github_missing_required_env(
+    client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv('OSPREY_RULES_SUBMISSION_BACKEND', 'github')
     monkeypatch.delenv('OSPREY_RULES_REPO', raising=False)
     monkeypatch.delenv('OSPREY_GITHUB_TOKEN', raising=False)
     res = client.post(
@@ -217,14 +254,16 @@ def test_submit_returns_503_when_github_not_configured(
         },
     )
     assert res.status_code == 503
+    body = res.json
+    assert body is not None
+    assert 'OSPREY_RULES_REPO' in body['error']
 
 
 @pytest.mark.use_rules_sources(_base_sources)
 def test_submit_blocks_invalid_sml_before_calling_github(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
+    _set_github_backend(monkeypatch)
 
     with requests_mock_module.Mocker() as m:
         res = client.post(
@@ -247,8 +286,7 @@ def test_submit_blocks_invalid_sml_before_calling_github(
 
 @pytest.mark.use_rules_sources(_base_sources)
 def test_submit_rejects_bad_rule_name(client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
+    _set_github_backend(monkeypatch)
     res = client.post(
         url_for('rule_drafts.submit_draft'),
         json={
@@ -266,10 +304,7 @@ def test_submit_rejects_bad_rule_name(client: 'FlaskClient[Response]', monkeypat
 def test_submit_happy_path_creates_branch_commits_and_opens_pr(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
-    monkeypatch.setenv('OSPREY_RULES_BASE_BRANCH', 'main')
-    monkeypatch.setenv('OSPREY_RULES_PATH_IN_REPO', 'rules')
+    _set_github_backend(monkeypatch, OSPREY_RULES_PATH_IN_REPO='rules')
 
     repo_url = 'https://api.github.com/repos/roostorg/osprey-rules'
 
@@ -298,6 +333,10 @@ def test_submit_happy_path_creates_branch_commits_and_opens_pr(
     assert res.status_code == 200
     body = res.json
     assert body is not None
+    assert body['title'] == 'Pull request #42 opened'
+    assert body['url'] == 'https://github.com/roostorg/osprey-rules/pull/42'
+    assert body['main_sml_updated'] is False
+    # GitHub-specific extras are surfaced for adopters that want them.
     assert body['pr_number'] == 42
     assert body['pr_url'] == 'https://github.com/roostorg/osprey-rules/pull/42'
     assert body['path_in_repo'] == 'rules/new_rule.sml'
@@ -308,9 +347,7 @@ def test_submit_happy_path_creates_branch_commits_and_opens_pr(
 def test_submit_wire_into_main_appends_require_line(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
-    monkeypatch.setenv('OSPREY_RULES_BASE_BRANCH', 'main')
+    _set_github_backend(monkeypatch)
 
     repo_url = 'https://api.github.com/repos/roostorg/osprey-rules'
     existing_main = "Import(rules=['models/post.sml'])\n\nRequire(rule='rules/post_contains_hello.sml')\n"
@@ -359,8 +396,7 @@ def test_submit_wire_into_main_appends_require_line(
 def test_submit_wire_into_main_skips_when_require_already_present(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
+    _set_github_backend(monkeypatch)
 
     repo_url = 'https://api.github.com/repos/roostorg/osprey-rules'
     existing_main = "Require(rule='rules/already_here.sml')\n"
@@ -403,8 +439,7 @@ def test_submit_wire_into_main_skips_when_require_already_present(
 def test_submit_409_if_new_rule_file_already_exists(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
+    _set_github_backend(monkeypatch)
 
     repo_url = 'https://api.github.com/repos/roostorg/osprey-rules'
 
@@ -433,9 +468,7 @@ def test_submit_409_if_new_rule_file_already_exists(
 def test_pending_filters_to_rules_path_and_sml(
     client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv('OSPREY_RULES_REPO', 'roostorg/osprey-rules')
-    monkeypatch.setenv('OSPREY_GITHUB_TOKEN', 'gh_fake_token')
-    monkeypatch.setenv('OSPREY_RULES_PATH_IN_REPO', 'rules')
+    _set_github_backend(monkeypatch, OSPREY_RULES_PATH_IN_REPO='rules')
 
     repo_url = 'https://api.github.com/repos/roostorg/osprey-rules'
 
@@ -476,8 +509,12 @@ def test_pending_filters_to_rules_path_and_sml(
     body = res.json
     assert body is not None
     assert len(body['pending']) == 1
-    assert body['pending'][0]['pr_number'] == 1
-    assert body['pending'][0]['touched_files'] == ['rules/x.sml']
+    entry = body['pending'][0]
+    assert entry['title'] == 'Add rule X'
+    assert entry['url'] == 'https://github.com/roostorg/osprey-rules/pull/1'
+    assert entry['touched_files'] == ['rules/x.sml']
+    # GitHub-specific extras carried through for adopters that want them.
+    assert entry['pr_number'] == 1
 
 
 @pytest.mark.use_rules_sources(_base_sources)
@@ -612,3 +649,168 @@ def test_parse_into_builder_rejects_syntax_error(client: 'FlaskClient[Response]'
     assert body is not None
     assert body['supported'] is False
     assert 'could not parse SML' in body['reason']
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_unknown_backend_value_returns_500(client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('OSPREY_RULES_SUBMISSION_BACKEND', 'tangled')
+    res = client.post(
+        url_for('rule_drafts.submit_draft'),
+        json={
+            'path': 'rules/new_rule.sml',
+            'source': "AnotherRule = Rule(when_all=[PostText == 'bye'], description='bye')",
+            'rule_name': 'AnotherRule',
+            'summary': '',
+            'is_new_rule': True,
+        },
+    )
+    assert res.status_code == 500
+    body = res.json
+    assert body is not None
+    assert "Unknown OSPREY_RULES_SUBMISSION_BACKEND 'tangled'" in body['error']
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_pending_returns_empty_list_for_null_backend(
+    client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv('OSPREY_RULES_SUBMISSION_BACKEND', raising=False)
+    res = client.get(url_for('rule_drafts.pending_drafts'))
+    assert res.status_code == 503
+    body = res.json
+    assert body is not None
+    assert body['pending'] == []
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_submit_github_enterprise_url_is_threaded_into_requests(
+    client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub Enterprise customers point OSPREY_GITHUB_API_URL at their own host; every API call must use it."""
+    _set_github_backend(
+        monkeypatch,
+        OSPREY_GITHUB_API_URL='https://github.acme.test/api/v3',
+        OSPREY_RULES_REPO='acme/rules',
+    )
+
+    repo_url = 'https://github.acme.test/api/v3/repos/acme/rules'
+
+    with requests_mock_module.Mocker() as m:
+        m.get(f'{repo_url}/git/ref/heads/main', json={'object': {'sha': 'BASE_SHA'}})
+        m.get(f'{repo_url}/contents/rules/new_rule.sml', status_code=404)
+        m.post(f'{repo_url}/git/refs', status_code=201, json={})
+        m.put(f'{repo_url}/contents/rules/new_rule.sml', status_code=201, json={})
+        m.post(
+            f'{repo_url}/pulls',
+            status_code=201,
+            json={'number': 5, 'html_url': 'https://github.acme.test/acme/rules/pull/5'},
+        )
+
+        res = client.post(
+            url_for('rule_drafts.submit_draft'),
+            json={
+                'path': 'rules/new_rule.sml',
+                'source': "AnotherRule = Rule(when_all=[PostText == 'bye'], description='bye')",
+                'rule_name': 'AnotherRule',
+                'summary': '',
+                'is_new_rule': True,
+            },
+        )
+
+    assert res.status_code == 200
+    body = res.json
+    assert body is not None
+    assert body['url'] == 'https://github.acme.test/acme/rules/pull/5'
+    # If any call had hit api.github.com instead, the Mocker would have raised NoMockAddress.
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_local_backend_writes_file_and_returns_no_url(
+    client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rules_dir = Path(tmpdir)
+        (rules_dir / 'main.sml').write_text("Import(rules=['models/post.sml'])\n", encoding='utf-8')
+
+        monkeypatch.setenv('OSPREY_RULES_SUBMISSION_BACKEND', 'local')
+        monkeypatch.setenv('OSPREY_RULES_LOCAL_PATH', str(rules_dir))
+
+        res = client.post(
+            url_for('rule_drafts.submit_draft'),
+            json={
+                'path': 'rules/new_rule.sml',
+                'source': "AnotherRule = Rule(when_all=[PostText == 'bye'], description='bye')",
+                'rule_name': 'AnotherRule',
+                'summary': 'add bye rule',
+                'is_new_rule': True,
+                'wire_into_main': False,
+            },
+        )
+
+        assert res.status_code == 200
+        body = res.json
+        assert body is not None
+        assert body['url'] is None
+        assert 'rules/new_rule.sml' in body['title']
+        assert body['main_sml_updated'] is False
+
+        written = (rules_dir / 'rules' / 'new_rule.sml').read_text(encoding='utf-8')
+        assert 'AnotherRule' in written
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_local_backend_wires_into_main_when_requested(
+    client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rules_dir = Path(tmpdir)
+        (rules_dir / 'main.sml').write_text("Import(rules=['models/post.sml'])\n", encoding='utf-8')
+
+        monkeypatch.setenv('OSPREY_RULES_SUBMISSION_BACKEND', 'local')
+        monkeypatch.setenv('OSPREY_RULES_LOCAL_PATH', str(rules_dir))
+
+        res = client.post(
+            url_for('rule_drafts.submit_draft'),
+            json={
+                'path': 'rules/new_rule.sml',
+                'source': "AnotherRule = Rule(when_all=[PostText == 'bye'], description='bye')",
+                'rule_name': 'AnotherRule',
+                'summary': '',
+                'is_new_rule': True,
+                'wire_into_main': True,
+            },
+        )
+
+        assert res.status_code == 200
+        body = res.json
+        assert body is not None
+        assert body['main_sml_updated'] is True
+        updated_main = (rules_dir / 'main.sml').read_text(encoding='utf-8')
+        assert "Require(rule='rules/new_rule.sml')" in updated_main
+
+
+@pytest.mark.use_rules_sources(_base_sources)
+def test_local_backend_rejects_path_traversal(client: 'FlaskClient[Response]', monkeypatch: pytest.MonkeyPatch) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rules_dir = Path(tmpdir)
+        monkeypatch.setenv('OSPREY_RULES_SUBMISSION_BACKEND', 'local')
+        monkeypatch.setenv('OSPREY_RULES_LOCAL_PATH', str(rules_dir))
+
+        # The view layer already rejects '..' in the path, so to actually exercise the
+        # local backend's own guard we bypass the view-level check by going around the
+        # API: instantiate the backend and call submit_draft directly with a traversal path.
+        from osprey.worker.ui_api.osprey.views._rule_drafts_backend import RuleDraftBackendError
+        from osprey.worker.ui_api.osprey.views._rule_drafts_local import LocalBackend, LocalConfig
+
+        backend = LocalBackend(LocalConfig(rules_dir=rules_dir))
+        with pytest.raises(RuleDraftBackendError) as exc_info:
+            backend.submit_draft(
+                draft_path='../escape.sml',
+                sml_source='x = 1',
+                rule_name='X',
+                summary='',
+                author_email='test@local',
+                is_new_rule=True,
+                wire_into_main=False,
+            )
+        assert 'escapes the configured rules directory' in exc_info.value.message

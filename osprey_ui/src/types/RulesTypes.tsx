@@ -68,11 +68,13 @@ export interface RuleDraftVocabulary {
 }
 
 export interface RuleDraftSubmitResponse {
-  pr_number: number;
-  pr_url: string;
-  branch: string;
-  path_in_repo: string;
-  main_sml_updated?: boolean;
+  // Backend-neutral fields produced by every RuleSubmissionBackend.
+  title: string;
+  url: string | null;
+  main_sml_updated: boolean;
+  // Backend-specific extras (e.g., pr_number, branch for the GitHub backend;
+  // path_on_disk for the local backend).
+  [extra: string]: unknown;
 }
 
 export type ConditionOperator = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'includes' | 'excludes';
@@ -106,13 +108,12 @@ export type ParseIntoBuilderResponse =
   { supported: true; model: RuleBuilderModel } | { supported: false; reason: string };
 
 export interface PendingDraft {
-  pr_number: number;
   title: string;
-  pr_url: string;
-  branch: string;
+  url: string;
   author: string;
   created_at: string;
   touched_files: string[];
+  [extra: string]: unknown;
 }
 
 export interface PendingDraftsResponse {

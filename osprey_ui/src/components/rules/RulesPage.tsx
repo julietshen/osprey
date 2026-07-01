@@ -326,10 +326,10 @@ const PendingDraftsBanner: React.FC<{
       message={`${pending.length} pending rule draft${pending.length === 1 ? '' : 's'} awaiting review`}
       description={
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          {pending.slice(0, 8).map((p) => {
-            return <PendingDraftRow key={p.pr_number} draft={p} />;
+          {pending.slice(0, 8).map((p, i) => {
+            return <PendingDraftRow key={`${p.url}-${i}`} draft={p} />;
           })}
-          {pending.length > 8 && <Text type="secondary">+{pending.length - 8} more open in GitHub.</Text>}
+          {pending.length > 8 && <Text type="secondary">+{pending.length - 8} more in review.</Text>}
         </Space>
       }
     />
@@ -339,8 +339,8 @@ const PendingDraftsBanner: React.FC<{
 const PendingDraftRow: React.FC<{ draft: PendingDraft }> = ({ draft }) => {
   return (
     <div>
-      <a href={draft.pr_url} target="_blank" rel="noopener noreferrer">
-        #{draft.pr_number} {draft.title}
+      <a href={draft.url} target="_blank" rel="noopener noreferrer">
+        {draft.title}
       </a>{' '}
       <Text type="secondary" style={{ fontSize: 12 }}>
         by {draft.author}, {draft.touched_files.join(', ')}
