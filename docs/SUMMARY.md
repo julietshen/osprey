@@ -19,7 +19,6 @@
   - [Troubleshooting](development/troubleshooting.md)
   - [IDE Setup](development/ide.md)
   - [Release Process](development/releases.md)
-  - [Rule Submission Backends](development/rule-submission-backends.md)
 
 ---
 

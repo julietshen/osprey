@@ -6,8 +6,19 @@ or a filesystem on a shared volume. Each is one implementation of the
 RuleSubmissionBackend Protocol below.
 
 `load_backend()` reads `OSPREY_RULES_SUBMISSION_BACKEND` and instantiates the
-chosen backend with its own env vars. Defaults to `null` so the upstream
-release ships safe by default; adopters opt into a backend explicitly.
+chosen backend with its own env vars. Defaults to `null` so an unconfigured
+install ships safe; adopters opt into a backend explicitly.
+
+Adopter docs (env vars per backend, how to choose one): see
+`docs/user/manage.md`.
+
+Adding a new backend: implement a class with `submit_draft` and
+`list_pending_drafts` matching the Protocol below, add a case in
+`load_backend()`, and update the "unknown backend" error message here plus
+the "no backend configured" message in `_rule_drafts_null.py`. The existing
+`_rule_drafts_github.py` and `_rule_drafts_gitlab.py` modules are working
+templates for HTTP-backed adapters; `_rule_drafts_local.py` for filesystem;
+`_rule_drafts_tangled.py` for anything that writes an ATProto record.
 """
 
 from __future__ import annotations
@@ -121,11 +132,15 @@ def load_backend() -> RuleSubmissionBackend:
         from ._rule_drafts_gitlab import GitLabBackend
 
         return GitLabBackend.from_env()
+    if name == 'tangled':
+        from ._rule_drafts_tangled import TangledBackend
+
+        return TangledBackend.from_env()
     if name == 'local':
         from ._rule_drafts_local import LocalBackend
 
         return LocalBackend.from_env()
     raise RuleDraftBackendError(
-        f'Unknown OSPREY_RULES_SUBMISSION_BACKEND {name!r}; valid values are github, gitlab, local, null.',
+        f'Unknown OSPREY_RULES_SUBMISSION_BACKEND {name!r}; valid values are github, gitlab, tangled, local, null.',
         status_code=500,
     )

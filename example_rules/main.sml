@@ -9,3 +9,5 @@ Require(rule='rules/ContainsDog.sml')
 Require(rule='rules/contains_roost.sml')
 
 Require(rule='rules/contains_gitlab.sml')
+
+Require(rule='rules/contains_tangle.sml')

@@ -56,3 +56,67 @@ The list is paginated (50 per page) and can be filtered and sorted:
 - **Sort**: by name, most referenced, or least referenced
 
 Each row shows the rule's name, source file, description, reference count, and line number within the source file.
+
+## Rule Authoring (Experimental feature)
+
+Users can draft SML rules directly in the UI. Submit opens a review unit against a configured git remote so authoring, review, and merge use the same tools users already have.
+
+The editor validates every keystroke against the same AST validator the running engine uses, so compile-time errors surface before the pull request opens. The Rule Builder view expresses the common shape (name, conditions, outcomes) as a form and generates SML; the Code Editor view accepts arbitrary SML for anything the builder can't represent.
+
+### Rule submission backends
+
+The Submit button routes drafts through a pluggable backend. Pick one for your deployment by setting `OSPREY_RULES_SUBMISSION_BACKEND` on the `osprey-ui-api` process:
+
+| Value | What it does | Required env vars |
+|---|---|---|
+| `null` (default) | Returns 503 on any submit or list call. Ships as the default so an unconfigured install never writes anything. | none |
+| `github` | Opens a pull request on a configured repo. Works with github.com and GitHub Enterprise. | `OSPREY_RULES_REPO`, `OSPREY_GITHUB_TOKEN` (+ optionals) |
+| `gitlab` | Opens a merge request on a configured project. Works with gitlab.com and self-hosted GitLab. | `OSPREY_GITLAB_PROJECT`, `OSPREY_GITLAB_TOKEN` (+ optionals) |
+| `tangled` | Opens a Tangled pull as an ATProto `sh.tangled.repo.pull` record on the user's PDS. | `OSPREY_TANGLED_HANDLE`, `OSPREY_TANGLED_APP_PASSWORD`, `OSPREY_TANGLED_REPO`, `OSPREY_TANGLED_REPO_DID` |
+| `local` | Writes SML directly to a mounted directory. For self-hosted setups whose deploy pipeline already syncs a rules directory into the engine. | `OSPREY_RULES_LOCAL_PATH` |
+
+Env vars shared across every backend that targets a git host:
+
+- `OSPREY_RULES_BASE_BRANCH` (default `main`) — the branch the review targets.
+- `OSPREY_RULES_PATH_IN_REPO` (default empty) — subdirectory inside the target repo where rule files live, e.g. `example_rules`. Leave empty if rules sit at the repo root.
+
+#### `github`
+
+| Var | Default | Notes |
+|---|---|---|
+| `OSPREY_RULES_REPO` | _required_ | `owner/name` of the repo to PR against. |
+| `OSPREY_GITHUB_TOKEN` | _required_ | Fine-grained PAT with `Contents: read/write` and `Pull requests: read/write` on the repo. |
+| `OSPREY_GITHUB_API_URL` | `https://api.github.com` | Set for GitHub Enterprise: e.g. `https://github.acme.example/api/v3`. |
+
+#### `gitlab`
+
+| Var | Default | Notes |
+|---|---|---|
+| `OSPREY_GITLAB_PROJECT` | _required_ | `namespace/project` of the project to MR against. |
+| `OSPREY_GITLAB_TOKEN` | _required_ | Project or personal access token with the `api` scope. |
+| `OSPREY_GITLAB_URL` | `https://gitlab.com` | Set for self-hosted GitLab: e.g. `https://gitlab.mycompany.example`. |
+
+#### `tangled`
+
+Tangled is an ATProto-native git host: pulls are records, not REST resources. The adapter authenticates the user's Bluesky identity, then writes an `sh.tangled.repo.pull` record (carrying a gzipped `git format-patch` blob) to the user's PDS via `com.atproto.repo.createRecord`. There is no tangled.org-side REST endpoint to write against.
+
+**Limitations of the current adapter:** new rules only. Edits and the "wire into main.sml" option return 501 because they'd require rendering a diff against an existing file or a multi-file patch.
+
+| Var | Default | Notes |
+|---|---|---|
+| `OSPREY_TANGLED_HANDLE` | _required_ | The user's ATProto handle (e.g. `julietshen.bsky.social`). |
+| `OSPREY_TANGLED_APP_PASSWORD` | _required_ | Bluesky app password. Create at https://bsky.app/settings/app-passwords. |
+| `OSPREY_TANGLED_REPO` | _required_ | `handle/repo-name` of the target Tangled repo. Used to construct the viewable URL. |
+| `OSPREY_TANGLED_REPO_DID` | _required_ | The repo's DID (e.g. `did:plc:55uxnkmuoiwwgyoqjbjo4z5t`). Tangled shows this in the empty-repo onboarding under "Configure your remote to `git@tangled.org:<did>`". |
+| `OSPREY_TANGLED_PDS_URL` | `https://bsky.social` | Only override if the user's account lives on a non-Bluesky PDS. |
+| `OSPREY_TANGLED_URL` | `https://tangled.org` | Used to construct the human-viewable pull URL. |
+
+#### `local`
+
+| Var | Default | Notes |
+|---|---|---|
+| `OSPREY_RULES_LOCAL_PATH` | _required_ | Absolute path to the directory the backend writes SML into. Must already exist. Submissions take effect immediately; there's no review queue. |
+
+### Adding a rule submission backend
+
+Add a Python module next to `_rule_drafts_github.py` that implements the `RuleSubmissionBackend` Protocol defined in `_rule_drafts_backend.py`, then wire it into `load_backend()`. See the module docstring on `_rule_drafts_backend.py` for the contract; the existing HTTP-backed modules (`_rule_drafts_github.py`, `_rule_drafts_gitlab.py`) are working templates.

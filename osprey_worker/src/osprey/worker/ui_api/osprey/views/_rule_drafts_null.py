@@ -1,7 +1,7 @@
 """Default submission backend: nothing is configured, so every call fails fast.
 
 Ships as the default so an unconfigured upstream install never opens a PR or
-writes a file without an operator explicitly opting into a backend.
+writes a file without an adopter explicitly opting into a backend.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ class NullBackend:
     def _err() -> RuleDraftBackendError:
         return RuleDraftBackendError(
             'No rule-submission backend is configured. Set OSPREY_RULES_SUBMISSION_BACKEND '
-            'to one of: github, gitlab, local. See docs for what each one needs.',
+            'to one of: github, gitlab, tangled, local. See docs for what each one needs.',
             status_code=503,
         )
 

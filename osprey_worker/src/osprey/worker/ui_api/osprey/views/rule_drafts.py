@@ -198,7 +198,7 @@ def _collect_features(sources: Iterable[Source]) -> list[dict[str, Any]]:
         if name in seen:
             continue
         # Skip `MyRule = Rule(...)` assigns; the builder dropdown is for values
-        # an operator can reference inside conditions, not for rule definitions.
+        # a user can reference inside conditions, not for rule definitions.
         if _is_rule_call(assign.value):
             continue
         seen.add(name)
@@ -250,7 +250,7 @@ def _collect_effects(sources: Iterable[Source]) -> list[str]:
 
     Used as the effect dropdown. Sourced from real usage rather than from the
     UDF registry because the registry holds every UDF and we want a shortlist
-    of things operators actually use as actions.
+    of things users actually use as actions.
     """
     seen: set[str] = set()
 
@@ -459,7 +459,7 @@ def _parse_into_builder_model(source: Source) -> dict[str, Any]:
     `RuleName = Rule(when_all=[...], description='...')`, and an optional
     `WhenRules(rules_any=[RuleName], then=[...])` whose `then` entries are
     UDF calls with literal or Name arguments. Anything richer means the file
-    can't round-trip and the operator must use Code Editor.
+    can't round-trip and the user must use Code Editor.
     """
     try:
         statements = source.ast_root.statements
