@@ -14,6 +14,7 @@ Set `OSPREY_RULES_SUBMISSION_BACKEND` on the `osprey-ui-api` process:
 |---|---|---|
 | `null` (default) | Returns 503 on any submit/list call. Ships as the default so an unconfigured install never writes anything. | none |
 | `github` | Opens a PR on a configured repo. Works with github.com and GitHub Enterprise. | `OSPREY_RULES_REPO`, `OSPREY_GITHUB_TOKEN` (+ optionals) |
+| `gitlab` | Opens a merge request on a configured project. Works with gitlab.com and self-hosted GitLab. | `OSPREY_GITLAB_PROJECT`, `OSPREY_GITLAB_TOKEN` (+ optionals) |
 | `local` | Writes SML directly to a mounted directory. For self-hosted setups whose deploy pipeline already syncs a rules directory into the engine. | `OSPREY_RULES_LOCAL_PATH` |
 
 ### `github`
@@ -25,6 +26,16 @@ Set `OSPREY_RULES_SUBMISSION_BACKEND` on the `osprey-ui-api` process:
 | `OSPREY_GITHUB_API_URL` | `https://api.github.com` | Set for GitHub Enterprise: e.g. `https://github.acme.example/api/v3`. |
 | `OSPREY_RULES_BASE_BRANCH` | `main` | The branch PRs target. |
 | `OSPREY_RULES_PATH_IN_REPO` | _(none)_ | Subdirectory inside the repo where rule files live, e.g. `example_rules`. Leave empty if rules sit at the repo root. |
+
+### `gitlab`
+
+| Var | Default | Notes |
+|---|---|---|
+| `OSPREY_GITLAB_PROJECT` | _required_ | `namespace/project` of the project to MR against (e.g. `myorg/osprey-rules`). |
+| `OSPREY_GITLAB_TOKEN` | _required_ | Project or personal access token with the `api` scope. |
+| `OSPREY_GITLAB_URL` | `https://gitlab.com` | Set for self-hosted GitLab: e.g. `https://gitlab.mycompany.example`. |
+| `OSPREY_RULES_BASE_BRANCH` | `main` | The branch merge requests target. Shared with the `github` backend. |
+| `OSPREY_RULES_PATH_IN_REPO` | _(none)_ | Subdirectory inside the project where rule files live. Shared with the `github` backend. |
 
 ### `local`
 
@@ -62,22 +73,25 @@ Raise `RuleDraftBackendError(message, status_code)` for any failure path
 (missing config, upstream API error, file conflict, etc.); the view layer
 surfaces the message and status to the operator.
 
-To add, for example, a GitLab backend:
+The `_rule_drafts_github.py` and `_rule_drafts_gitlab.py` modules are working
+templates. To add, for example, a Tangled backend:
 
-1. Add `_rule_drafts_gitlab.py` next to the existing backend modules with a
-   `GitLabBackend` class implementing the Protocol.
+1. Add `_rule_drafts_tangled.py` next to the existing backend modules with a
+   `TangledBackend` class implementing the Protocol.
 2. Wire it into `load_backend()` in `_rule_drafts_backend.py`:
    ```python
-   if name == 'gitlab':
-       from ._rule_drafts_gitlab import GitLabBackend
-       return GitLabBackend.from_env()
+   if name == 'tangled':
+       from ._rule_drafts_tangled import TangledBackend
+       return TangledBackend.from_env()
    ```
-3. Document its env vars in this file.
+3. Add the new value to the "unknown backend" error message in the same file
+   and to the "no backend configured" message in `_rule_drafts_null.py`.
+4. Document its env vars in this file.
 
-Tests for the GitHub backend in
+Tests for the existing backends in
 `osprey_worker/src/osprey/worker/ui_api/osprey/views/tests/test_rule_drafts.py`
-are a working template; they mock the upstream HTTP calls with
-`requests_mock` and assert against the response shape.
+mock the upstream HTTP calls with `requests_mock` and assert against the
+response shape — a workable pattern for any HTTP-backed adapter.
 
 ## Why this is pluggable
 

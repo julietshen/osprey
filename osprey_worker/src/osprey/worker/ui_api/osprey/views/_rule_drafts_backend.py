@@ -117,11 +117,15 @@ def load_backend() -> RuleSubmissionBackend:
         from ._rule_drafts_github import GitHubBackend
 
         return GitHubBackend.from_env()
+    if name == 'gitlab':
+        from ._rule_drafts_gitlab import GitLabBackend
+
+        return GitLabBackend.from_env()
     if name == 'local':
         from ._rule_drafts_local import LocalBackend
 
         return LocalBackend.from_env()
     raise RuleDraftBackendError(
-        f'Unknown OSPREY_RULES_SUBMISSION_BACKEND {name!r}; valid values are github, local, null.',
+        f'Unknown OSPREY_RULES_SUBMISSION_BACKEND {name!r}; valid values are github, gitlab, local, null.',
         status_code=500,
     )
