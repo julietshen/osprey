@@ -8,6 +8,7 @@ Import(
 ContainsCat = Rule(
   when_all=[
     TextContains(text=PostText, phrase='cat'),
+    EventType == '\'create_post\'',
   ],
   description='looks for the word \'cat\' in the text of a post',
 )
