@@ -243,11 +243,18 @@ const RuleEditorView: React.FC<{ data: BootstrapData }> = ({ data }) => {
                 <Form.Item label="File path" tooltip="Path inside the rules repo where this file will live.">
                   <Input value={path} onChange={(e) => setPath(e.target.value)} disabled={!data.isNewRule} />
                 </Form.Item>
-                <Form.Item label="Summary for reviewers">
+                <Form.Item
+                  label={data.isNewRule ? 'Why this rule? (for reviewers)' : "What's changing? (for reviewers)"}
+                  tooltip="Becomes the pull request description. Not saved into the rule file itself."
+                >
                   <Input.TextArea
                     value={summary}
                     onChange={(e) => setSummary(e.target.value)}
-                    placeholder="What does this rule do, and why are we adding/changing it?"
+                    placeholder={
+                      data.isNewRule
+                        ? 'Why do we need this rule? What behaviour does it target?'
+                        : 'What are you changing about this rule, and why?'
+                    }
                     autoSize={{ minRows: 2, maxRows: 4 }}
                   />
                 </Form.Item>
@@ -542,7 +549,10 @@ const RuleBuilderEditor: React.FC<{
             placeholder="ContainsHello"
           />
         </Form.Item>
-        <Form.Item label="Description">
+        <Form.Item
+          label="Rule description"
+          tooltip="Saved into the rule file as `description='...'`. Shown in the Rules Registry."
+        >
           <Input.TextArea
             value={model.description}
             onChange={(e) => setModel((prev) => ({ ...prev, description: e.target.value }))}
